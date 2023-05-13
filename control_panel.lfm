@@ -1,0 +1,58 @@
+object ControlPanel: TControlPanel
+  Left = 2031
+  Height = 596
+  Top = 52
+  Width = 811
+  Caption = 'ControlPanel'
+  ClientHeight = 596
+  ClientWidth = 811
+  DesignTimePPI = 97
+  OnCreate = FormCreate
+  LCLVersion = '2.2.0.4'
+  object BCompileFile: TButton
+    Left = 128
+    Height = 32
+    Top = 296
+    Width = 124
+    Caption = 'Compile File'
+    OnClick = BCompileFileClick
+    TabOrder = 0
+  end
+  object ManualInput: TMemo
+    Left = 32
+    Height = 204
+    Hint = 'Write program here'
+    Top = 0
+    Width = 294
+    Lines.Strings = (
+      'ManualInput'
+    )
+    ParentShowHint = False
+    ShowHint = True
+    TabOrder = 1
+  end
+  object BCompileText: TButton
+    Left = 128
+    Height = 33
+    Top = 248
+    Width = 124
+    Caption = 'Compile Text'
+    OnClick = BCompileTextClick
+    TabOrder = 2
+  end
+  object ParseTreeView: TTreeView
+    Left = 344
+    Height = 528
+    Top = 24
+    Width = 384
+    TabOrder = 3
+  end
+  object Label1: TLabel
+    Left = 488
+    Height = 18
+    Top = 0
+    Width = 61
+    Caption = 'Parse Tree'
+    OnClick = Label1Click
+  end
+end
