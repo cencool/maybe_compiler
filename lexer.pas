@@ -336,7 +336,7 @@ begin
     else
     begin
       Lookahead := TToken.Create(IDENTIFIER, s);
-      t := TToken.Create(IDENTIFIER, s);
+      t := TToken.Create(IDENTIFIER, s);   // create copy of data as Lookahead will get changed
       StoreLexemePosition(IdPosition, t); // update word table entry
       StoreLexemePosition(IdPosition, Lookahead);  //and  to new Lookahead
       Words.Add(s, t);  // add new identifier to words table

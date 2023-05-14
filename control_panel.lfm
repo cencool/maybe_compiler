@@ -1,7 +1,7 @@
 object ControlPanel: TControlPanel
-  Left = 2031
+  Left = 2078
   Height = 596
-  Top = 52
+  Top = 23
   Width = 811
   Caption = 'ControlPanel'
   ClientHeight = 596

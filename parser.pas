@@ -14,7 +14,7 @@ statements -> block                    statements.n = block.n
 
 expr -> term rest                      expr.n =  Expr(Term();Expr(); nil)
 expr_rest -> + term rest               expr_rest.n = Expr(Term();Expr(); Lookahead)
-            | - term rest | @          expr_rest.n =  Expr(Term();Expr(); Lookahead)
+           | - term rest | @           expr_rest.n =  Expr(Term();Expr(); Lookahead)
 
 term -> factor term_rest               term.n =  Term(Factor(); Term(); nil)
 term_rest -> * factor term_rest        term_rest.n =  Term(Factor(); Term(); Lookahead)
@@ -807,14 +807,10 @@ begin
   Nodes := expr();
   Result.SyntaxNode := TAssign.Create(LeftSide, TExpr(Nodes.SyntaxNode));
 
-  //TAssign(Result.SyntaxNode).FRightSide := TExpr(Nodes.SyntaxNode);
-
   ParseNode.Link(Nodes.ParseNode);
-  //ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
   Symbol.SymbolValue := Nodes.SyntaxNode.Eval();
   Symbol.isAssigned := True;
   FreeAndNil(Nodes);
-  //Lex.Match(SEMICOLON);
 end;
 
 function TParser.statements(): TNodes;
@@ -1096,6 +1092,7 @@ var
   Nodes: TNodes;
   s: string;
   _Symbol: TSymbol;
+  _Token: TToken;
   row: integer;
   col: integer;
 
@@ -1104,6 +1101,14 @@ begin
   ParseNode.DisplayText := 'factor';
 
   case Lex.Lookahead.Tag of
+    MINUS: begin
+      Lex.Match(MINUS);
+      ParseNode.AddChildWithText('-' + Lex.Lookahead.Lexeme);
+      _Token := TToken.Create(NUMBER, '-' + Lex.Lookahead.Lexeme);
+      Result.SyntaxNode := TFactor.Create(_Token);
+      Lex.Match(NUMBER);
+    end;
+
     NUMBER: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
       Result.SyntaxNode := TFactor.Create(Lex.Lookahead);
@@ -1138,7 +1143,7 @@ begin
       FreeAndNil(Nodes);
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
       Lex.Match(RIGHT_PARENS);
-    end
+    end;
     else
     begin
       raise Exception.Create('@(' + IntToStr(Lex.CurrentLineNumber) +
