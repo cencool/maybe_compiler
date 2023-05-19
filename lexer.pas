@@ -8,9 +8,10 @@ uses
   Classes, Contnrs;
 
 type
-  TTokenTag = (NONE, NUMBER, IDENTIFIER, PLUS, MINUS, MULTIPLY, DIVIDE, LEFT_PARENS,
-    RIGHT_PARENS, SEMICOLON, FILE_END, UNKNOWN, CURLY_LEFT, CURLY_RIGHT,
-    TYPENAME, EQUAL_SIGN);
+  TTokenTag = (ttNONE, ttNUMBER, ttIDENTIFIER, ttPLUS, ttMINUS, ttMULTIPLY,
+    ttDIVIDE, ttLEFT_PARENS,
+    ttRIGHT_PARENS, ttSEMICOLON, ttFILE_END, ttUNKNOWN, ttCURLY_LEFT, ttCURLY_RIGHT,
+    ttTYPENAME, ttEQUAL_SIGN, ttAND, ttOR, ttIS_EQUAL, ttTRUE, ttFALSE);
 
   { TToken }
 
@@ -82,7 +83,7 @@ constructor TLexer.Create(const SrcFileName: string);
 begin
   SrcLines := TStringList.Create;
   SrcLines.LoadFromFile(SrcFileName);
-  Lookahead := TToken.Create(NONE, '');
+  Lookahead := TToken.Create(ttNONE, '');
   Words := InitWordsTable;
 end;
 
@@ -90,7 +91,7 @@ constructor TLexer.CreateManual(AMemoStrings: TStrings);
 begin
   SrcLines := TStringList.Create;
   SrcLines.AddStrings(AMemoStrings);
-  Lookahead := TToken.Create(NONE, '');
+  Lookahead := TToken.Create(ttNONE, '');
   Words := InitWordsTable;
 
 end;
@@ -182,7 +183,7 @@ begin
 
 end;
 
-{ returns first non-white character after current char or empty string if none }
+{ returns first non-white character after current char or empty string if ttNONE }
 function TLexer.PeekCharNonWhite: string;
 var
   PeekPosition: integer;
@@ -243,51 +244,67 @@ begin
   IdPosition[1] := CharPosition;
   case CurrentChar of
     '+': begin
-      Lookahead := TToken.Create(PLUS, '+');
+      Lookahead := TToken.Create(ttPLUS, '+');
       Exit();
     end;
     '-': begin
-      Lookahead := TToken.Create(MINUS, '-');
+      Lookahead := TToken.Create(ttMINUS, '-');
       Exit();
     end;
     '*': begin
-      Lookahead := TToken.Create(MULTIPLY, '*');
+      Lookahead := TToken.Create(ttMULTIPLY, '*');
       Exit();
     end;
     '/': begin
-      Lookahead := TToken.Create(DIVIDE, '/');
+      Lookahead := TToken.Create(ttDIVIDE, '/');
       Exit();
     end;
     '(': begin
-      Lookahead := TToken.Create(LEFT_PARENS, '(');
+      Lookahead := TToken.Create(ttLEFT_PARENS, '(');
       Exit();
     end;
     ')': begin
-      Lookahead := TToken.Create(RIGHT_PARENS, ')');
+      Lookahead := TToken.Create(ttRIGHT_PARENS, ')');
       Exit();
     end;
     ';': begin
-      Lookahead := TToken.Create(SEMICOLON, ';');
+      Lookahead := TToken.Create(ttSEMICOLON, ';');
       Exit();
     end;
     '{': begin
-      Lookahead := TToken.Create(CURLY_LEFT, '{');
+      Lookahead := TToken.Create(ttCURLY_LEFT, '{');
       Exit();
     end;
     '}': begin
-      Lookahead := TToken.Create(CURLY_RIGHT, '}');
+      Lookahead := TToken.Create(ttCURLY_RIGHT, '}');
       Exit;
     end;
     '=': begin
-      Lookahead := TToken.Create(EQUAL_SIGN, '=');
+      Lookahead := TToken.Create(ttEQUAL_SIGN, '=');
+      Exit;
+    end;
+    '|': begin
+      if PeekedChar = '|' then
+      begin
+        ReadChar();
+        Lookahead := TToken.Create(ttOR, '||');
+      end;
+      Exit;
+    end;
+    '&': begin
+      if PeekedChar = '&' then
+      begin
+        ReadChar();
+        Lookahead := TToken.Create(ttAND, '&&');
+      end;
       Exit;
     end;
     '': begin
-      Lookahead := TToken.Create(NONE, '');
+      Lookahead := TToken.Create(ttNONE, '');
       Exit();
     end;
   end;
-  {check for integer number }
+  {check for integer ttNUMBER }
 
   if IsDigit(utf8decode(CurrentChar), 1) then
   begin
@@ -298,7 +315,7 @@ begin
       ReadChar();
       s := s + CurrentChar;
     end;
-    {check for decimal number }
+    {check for decimal ttNUMBER }
     if PeekedChar = '.' then
     begin
       ReadChar();
@@ -311,12 +328,12 @@ begin
     end;
     if not (IsLetter(UTF8Decode(PeekedChar), 1)) then
     begin
-      Lookahead := TToken.Create(NUMBER, s);
+      Lookahead := TToken.Create(ttNUMBER, s);
       Exit();
     end;
 
   end;
-  {check for identifier }
+  {check for ttIDENTIFIER }
   if IsLetter(utf8decode(CurrentChar), 1) then
   begin
     s := CurrentChar;
@@ -327,7 +344,7 @@ begin
     end;
 
     t := TToken(Words.Items[s]);
-    if t <> nil then   // identifier exists ?
+    if t <> nil then   // ttIDENTIFIER exists ?
     begin
       Lookahead := TToken.Create(t.tag, s);
       StoreLexemePosition(IdPosition, t); // update word table entry
@@ -335,17 +352,18 @@ begin
     end
     else
     begin
-      Lookahead := TToken.Create(IDENTIFIER, s);
-      t := TToken.Create(IDENTIFIER, s);   // create copy of data as Lookahead will get changed
+      Lookahead := TToken.Create(ttIDENTIFIER, s);
+      t := TToken.Create(ttIDENTIFIER, s);
+      // create copy of data as Lookahead will get changed
       StoreLexemePosition(IdPosition, t); // update word table entry
       StoreLexemePosition(IdPosition, Lookahead);  //and  to new Lookahead
-      Words.Add(s, t);  // add new identifier to words table
+      Words.Add(s, t);  // add new ttIDENTIFIER to words table
     end;
 
     {todo: finalize token storage for identifiers }
     Exit();
   end;
-  Lookahead.Tag := UNKNOWN;
+  Lookahead.Tag := ttUNKNOWN;
   Lookahead.Lexeme := CurrentChar;
   Exit();
 end;
@@ -369,7 +387,7 @@ begin
 end;
 
 procedure TLexer.IsNumber(negative: boolean);
-{ #todo : solve negative number lexing}
+{ #todo : solve negative ttNUMBER lexing}
 begin
   if IsDigit(utf8decode(CurrentChar), 1) then
   begin
@@ -382,7 +400,7 @@ begin
       ReadChar();
       Lookahead.Lexeme := Lookahead.Lexeme + CurrentChar;
     end;
-    {check for decimal number }
+    {check for decimal ttNUMBER }
     if PeekedChar = '.' then
     begin
       ReadChar();
@@ -393,23 +411,29 @@ begin
         Lookahead.Lexeme := Lookahead.Lexeme + CurrentChar;
       end;
     end;
-    Lookahead.Tag := NUMBER;
+    Lookahead.Tag := ttNUMBER;
     Exit();
   end;
 end;
 
 function TLexer.InitWordsTable: TFPObjectHashTable;
 type
-  TWordList = array [0..2] of string;
+  TWordList = array [0..3] of string;
+  TTagList = array [0..3] of TTokenTag;
 var
-  WordList: TWordList = ('num', 'char', 'bool');
+  WordList: TWordList = ('num', 'bool', 'true', 'false');
+  TagList: TTagList = (ttTYPENAME, ttTYPENAME, ttTRUE, ttFALSE);
   s: string;
+  tag: TTokenTag;
   t: TToken;
+  i: integer;
 begin
   Result := TFPObjectHashTable.Create();
-  for s in WordList do
+  for i := 0 to Length(WordList) - 1 do
   begin
-    t := TToken.Create(TYPENAME, s);
+    s := WordList[i];
+    tag := TagList[i];
+    t := TToken.Create(tag, s);
     Result.Add(s, t);
   end;
 
@@ -424,7 +448,7 @@ begin
 
   for ar in TToken(Item).LexemePosition do
   begin
-    //identifier postions in src text line, col
+    //ttIDENTIFIER postions in src text line, col
     Write('(', ar[0], ',', ar[1], ') ');
   end;
   writeln();
@@ -443,7 +467,7 @@ constructor TToken.Create(ATag: TTokenTag; ALexeme: string);
 begin
   Tag := ATag;
   Lexeme := ALexeme;
-  if ATag = NUMBER then
+  if ATag = ttNUMBER then
     Value := StrToFloat(Lexeme);
 
 end;
