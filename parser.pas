@@ -3,9 +3,18 @@ Grammar:                               Syntax nodes:
 prg -> block prg                       prg.n = PrgSeq(Nodes: TSyntaxNode...)
       | block                          prg.n = PrgSeq(Nodes: TSyntaxNode...)
 block ->   { decls statements }        block.n = statements.n
+
+statements -> block                    statements.n = block.n
+            | assignment ; statements  statements.n = Seq(Nodes: TSyntaxNode...)
+            | expr ; statements        statements.n = Seq(Nodes: TSyntaxNode...)
+            | @                        statements.n = Seq(Nodes: TSyntaxNode...)
+
 decls -> decl decls                    decls.n = nil
         | @                            decls.n = nil
+
 decl -> TYPENAME ID ;                  decl.n = nil
+
+assignment -> ID = expr                assignment.n =  Assign(LeftSide, RightSide)
 
 bool -> bool_term bool_rest
 
@@ -14,17 +23,16 @@ bool_term -> expr
 
 bool_rest ->  || bool_term bool_rest
             | && bool_term bool_rest
+            | @
 
-statements -> block                    statements.n = block.n
-            | assignment ; statements  statements.n = Seq(Nodes: TSyntaxNode...)
-            | expr ; statements        statements.n = Seq(Nodes: TSyntaxNode...)
-            | @                        statements.n = Seq(Nodes: TSyntaxNode...)
+expr -> term expr_rest                 expr.n =  Expr(Term();Expr(); nil)
 
-expr -> term rest                      expr.n =  Expr(Term();Expr(); nil)
-expr_rest -> + term rest               expr_rest.n = Expr(Term();Expr(); Lookahead)
-           | - term rest | @           expr_rest.n =  Expr(Term();Expr(); Lookahead)
+expr_rest -> + term expr_rest          expr_rest.n = Expr(Term();Expr(); Lookahead)
+           | - term expr_rest          expr_rest.n =  Expr(Term();Expr(); Lookahead)
+           | @
 
 term -> factor term_rest               term.n =  Term(Factor(); Term(); nil)
+
 term_rest -> * factor term_rest        term_rest.n =  Term(Factor(); Term(); Lookahead)
            | / factor term_rest        term_rest.n =  Term(Factor(); Term(); Lookahead)
            | @                         term_rest.n = nil
@@ -33,13 +41,14 @@ factor -> ID                           factor.n = Factor (Lookahead)
         | NUMBER                       factor.n =  Factor (Lookahead)
         | ( expr)                      factor.n = expr.n
 
-assignment -> ID = expr                assignment.n =  Assign(LeftSide, RightSide)
 
 @ means empty production
 
 *)
 { #todo : finish grammar comment }
 { #done : zda sa ze prepis do postscript notacie pre napr. 1/2*3 nie je dobre }
+{ #todo : nejako cudne teraz vyzera syntax tree, treba zmenit }
+
 unit Parser;
 
 {$mode ObjFPC}{$H+}
@@ -53,12 +62,21 @@ uses
   ComCtrls;
 
 type
+  TValueType = (vtNUM, vtBOOL, vtUNDEFINED);
+
+  { TExprValue }
+
+  TExprValue = class
+  public
+    ValueType: TValueType;
+    Value: string;
+    constructor Create(AType: TValueType; AValue: string = '');
+  end;
 
   { TParseNode }
 
   TParseNode = class
     Name: string;
-    DisplayText: string;
     ChildrenList: TList;
     constructor Create();
     destructor Destroy; override;
@@ -69,42 +87,44 @@ type
   { TSyntaxNode }
 
   TSyntaxNode = class
-    FType: string;
+  private
     FDisplayText: string;
+    procedure SetDisplayText(AValue: string);
+  public
+    EvalData: TExprValue;
+    { children list purpose is to unify access to node childrens if different member names used }
     ChildrenList: TList;
     procedure Gen; virtual;
-    function Eval(AInputValue: extended = 0): extended; virtual;
+    function Eval(AInputValue: TExprValue = nil): TExprValue; virtual;
     destructor Destroy; override;
     function GetDisplayText: string; virtual;
-    property DisplayText: string read GetDisplayText;
+    property DisplayText: string read GetDisplayText write SetDisplayText;
   end;
 
   { TExpr }
 
   TExpr = class(TSyntaxNode)
-    FExpr: TSyntaxNode;
-    FTerm: TSyntaxNode;
-    FOpTokenTag: TTokenTag;
-    FTokenLexeme: string;
+    Expr: TSyntaxNode;
+    Term: TSyntaxNode;
+    OpTokenTag: TTokenTag;
+    OpTokenLexeme: string;
     constructor Create(ATerm: TSyntaxNode; AExpr: TSyntaxNode; AOpToken: TToken = nil);
     procedure Gen; override;
-    function Eval(AInputValue: extended = 0): extended; override;
-    function CheckTypes: boolean;
-    function DetermineType: string;
+    function Eval(AInputValue: TExprValue): TExprValue; override;
+    function DetermineType: TValueType;
   end;
 
   { TTermNode }
 
   TTerm = class(TSyntaxNode)
-    FFactor: TSyntaxNode;
-    FTerm: TSyntaxNode;
-    FTokenTag: TTokenTag;
-    FTokenLexeme: string;
+    Factor: TSyntaxNode;
+    Term: TSyntaxNode;
+    TokenTag: TTokenTag;
+    TokenLexeme: string;
     constructor Create(AFactor: TSyntaxNode; ATerm: TSyntaxNode; AOpToken: TToken = nil);
     procedure Gen; override;
-    function Eval(AInputValue: extended = 0): extended; override;
-    function CheckTypes: boolean;
-    function DetermineType: string;
+    function Eval(AInputValue: TExprValue=nil): TExprValue; override;
+    function DetermineType: TValueType;
   end;
 
   { TPrgSeq }
@@ -128,12 +148,11 @@ type
   { TFactor }
 
   TFactor = class(TSyntaxNode)
-    FTokenTag: TTokenTag;
-    FTokenLexeme: string;
-    FFactorValue: extended;
-    constructor Create(AToken: TToken; AValue: extended = 0);
+    Tag: TTokenTag;
+    Lexeme: string;
+    constructor Create(ATag: TTokenTag; ALexeme: string);
     procedure Gen; override;
-    function Eval(AInputValue: extended = 0): extended; override;
+    function Eval(AInputValue: TExprValue = nil): TExprValue; override;
   end;
 
   { TSemicolon }
@@ -147,8 +166,8 @@ type
 
   TAssign = class(TSyntaxNode)
     { #todo co vlastne chcem aby robil ? }
-    FLeftSide: string;
-    FRightSide: TExpr;
+    LeftSide: string;
+    RightSide: TExpr;
     constructor Create(ALeftSide: string; ARightSide: TExpr = nil);
     procedure Gen; override;
 
@@ -157,15 +176,15 @@ type
   { TBool }
 
   TBool = class(TSyntaxNode)
-    FBoolTerm: TSyntaxNode;
-    FBool: TSyntaxNode;
-    FOpTokenTag: TTokenTag;
-    FTokenLexeme: string;
-    constructor Create(ABoolTerm: TSyntaxNode; ABool: TSyntaxNode;
-      AOpToken: TToken = nil);
+    BoolTerm: TSyntaxNode;
+    Bool: TSyntaxNode;
+    OpTokenTag: TTokenTag;
+    TokenLexeme: string;
+    constructor Create(ABoolTerm: TSyntaxNode; ABool: TSyntaxNode; AOpToken: TToken = nil);
     procedure Gen; override;
-    function CheckTypes: boolean;
-    function DetermineType: string;
+    function DetermineType: TValueType;
+    function Eval(AInputValue: TExprValue = nil): TExprValue; override;
+
   end;
 
   { TNodes }
@@ -179,11 +198,15 @@ type
     destructor Destroy; override;
   end;
 
+  { TSymbol }
+
   TSymbol = class
-    SymbolType: string;
-    SymbolValue: extended;
-    isAssigned: boolean;
-    SymbolPosition: array [0..1] of integer;
+    EvalData: TExprValue;
+    //FSymbolType: string;
+    //SymbolValueText: string;
+    IsAssigned: boolean;
+    Position: TPosition;
+    constructor Create;
   end;
 
   { TSymbolTable }
@@ -194,7 +217,7 @@ type
     constructor Create(Parent: TSymbolTable);
     destructor Destroy; override;
     procedure Add(ALexeme: string; ASymbol: TSymbol);
-    function GetType(ALexeme: string): string;
+    function GetType(ALexeme: string): TValueType;
     procedure PrintSymbols;
   end;
 
@@ -243,68 +266,99 @@ uses
 var
   Lex: TLexer;
 
+{ TSymbol }
+
+constructor TSymbol.Create;
+begin
+  IsAssigned := False;
+end;
+
+{ TExprValue }
+
+
+constructor TExprValue.Create(AType: TValueType; AValue: string = '');
+begin
+  ValueType := AType;
+  Value := AValue;
+end;
+
+
 { TBool }
 
 constructor TBool.Create(ABoolTerm: TSyntaxNode; ABool: TSyntaxNode; AOpToken: TToken);
 begin
-  FBoolTerm := ABoolTerm;
-  FBool := ABool;
+  BoolTerm := ABoolTerm;
+  Bool := ABool;
+  EvalData := TExprValue.Create(DetermineType); // syntax node type given by BoolTerm
   if AOpToken <> nil then
   begin
     if (AOpToken.Tag = ttOR) or (AOPToken.Tag = ttAND) then
     begin
-      if (DetermineType <> 'bool') then
+      if (EvalData.ValueType <> vtBOOL) then
         raise Exception.Create('Non Bool operand type in Bool Expression');
-      FOpTokenTag := AOpToken.Tag;
-      FTokenLexeme := AOpToken.Lexeme;
-      FDisplayText := FTokenLexeme;
+      OpTokenTag := AOpToken.Tag;
+      TokenLexeme := AOpToken.Lexeme;
+      DisplayText := TokenLexeme;
     end
     else
       raise  Exception.Create(AOpToken.Lexeme + ' token passed to Bool Syntax Node');
   end
   else
   begin
-    {#todo - determine type of node for non-operation case}
-    FOpTokenTag := ttNONE;
-    FDisplayText := 'Bool';
+    {type of node for non-operation case is given by BoolTerm type }
+    OpTokenTag := ttNONE;
+    DisplayText := 'Bool';
   end;
   ChildrenList := TList.Create;
-  FType := DetermineType;
-  if FType = 'none' then raise Exception.Create('Type mismatch in TBool');
-  ChildrenList.Add(FBoolTerm);
-  ChildrenList.Add(FBool);
+  if EvalData.ValueType = vtUNDEFINED then raise Exception.Create('Type mismatch in TBool');
+  ChildrenList.Add(BoolTerm);
+  ChildrenList.Add(Bool);
   FreeAndNil(AOpToken);
 end;
 
 procedure TBool.Gen;
 begin
-  if FBoolTerm <> nil then FBoolTerm.Gen;
-  if FOpTokenTag <> ttNONE then Write(' ' + FTokenLexeme + ' ');
+  if BoolTerm <> nil then BoolTerm.Gen;
+  if OpTokenTag <> ttNONE then Write(' ' + TokenLexeme + ' ');
   // for correct postfix order
-  if FBool <> nil then FBool.Gen;
+  if Bool <> nil then Bool.Gen;
 end;
 
-function TBool.CheckTypes: boolean;
+
+
+function TBool.DetermineType: TValueType;
 begin
-  Result := True;
-  if (FBool <> nil) and (FBool.FType <> 'bool') then Result := False;
-  if (FBoolTerm <> nil) and (FBoolTerm.FType <> 'bool') then Result := False;
+  Result := vtUNDEFINED;
+  if BoolTerm <> nil then Result := BoolTerm.EvalData.ValueType;
+  if (Bool <> nil) and (Bool.EvalData.ValueType <> BoolTerm.EvalData.ValueType) then
+    Result := vtUNDEFINED;
 end;
 
-function TBool.DetermineType: string;
+function TBool.Eval(AInputValue: TExprValue): TExprValue;
 begin
-  Result := 'none';
-  if FBoolTerm <> nil then Result := FBoolTerm.FType;
-  if (FBool <> nil) and (FBool.FType <> FBoolTerm.FType) then Result := 'none';
+    Result:= BoolTerm.Eval();
+    case OpTokenTag of
+      ttOR: begin
+        Result.Value:=  BoolToStr(StrToBool(AInputValue.Value) or StrToBool(Result.Value));
+      end;
+      ttAND:begin
+        Result.Value:=  BoolToStr(StrToBool(AInputValue.Value) and StrToBool(Result.Value));
+      end;
+    end;
+if Bool <> nil then
+begin
+  Result := Bool.Eval(Result);
+end;
+
 end;
 
 { TAssign }
 
 constructor TAssign.Create(ALeftSide: string; ARightSide: TExpr = nil);
 begin
-  FLeftSide := ALeftSide;
-  FRightSide := ARightSide;
-  FDisplayText := 'Assign';
+  LeftSide := ALeftSide;
+  RightSide := ARightSide;
+  DisplayText := 'Assign';
   if ARightSide <> nil then
   begin
     ChildrenList := TList.Create;
@@ -314,8 +368,8 @@ end;
 
 procedure TAssign.Gen;
 begin
-  Write(' ' + FLeftSide + ' = ');
-  FRightSide.Gen;
+  Write(' ' + LeftSide + ' = ');
+  RightSide.Gen;
   Write(';' + LineEnding);
 
 end;
@@ -330,7 +384,7 @@ end;
 
 constructor TSemicolon.Create;
 begin
-  FDisplayText := ';';
+  DisplayText := ';';
 end;
 
 { TPrgSeq }
@@ -338,7 +392,7 @@ end;
 constructor TPrgSeq.Create;
 begin
   FPrgSeq := TList.Create;
-  FDisplayText := 'PrgSeq';
+  DisplayText := 'PrgSeq';
   ChildrenList := FPrgSeq;
 end;
 
@@ -359,35 +413,20 @@ end;
 
 { TFactor }
 
-constructor TFactor.Create(AToken: TToken; Avalue: extended = 0);
+constructor TFactor.Create(ATag: TTokenTag; ALexeme: string);
 begin
-  FTokenTag := AToken.Tag;
-  FTokenLexeme := AToken.Lexeme;
-  FFactorValue := Avalue;
-  FDisplayText := FTokenLexeme;
+  Tag := ATag;
+  Lexeme := ALexeme;
 end;
 
 procedure TFactor.Gen;
 begin
-  Write(' ' + FTokenLexeme + ' ');
+  Write(' ' + Lexeme + ' ');
 end;
 
-function TFactor.Eval(AInputValue: extended): extended;
+function TFactor.Eval(AInputValue: TExprValue = nil): TExprValue;
 begin
-  case FTokenTag of
-    ttNUMBER: begin
-      Result := StrToFloat(FTokenLexeme);
-    end;
-    ttIDENTIFIER: begin
-      Result := FFactorValue;
-    end;
-    ttTRUE: begin
-      Result := FFactorValue;
-    end;
-    ttFALSE: begin
-      Result := FFactorValue;
-    end;
-  end;
+  Result := EvalData;
 end;
 
 { TSequence }
@@ -395,7 +434,7 @@ end;
 constructor TSeq.Create;
 begin
   FExprSeq := TList.Create;
-  FDisplayText := 'Seq';
+  DisplayText := 'Seq';
   ChildrenList := FExprSeq;
 end;
 
@@ -419,148 +458,141 @@ end;
 
 constructor TExpr.Create(ATerm: TSyntaxNode; AExpr: TSyntaxNode; AOpToken: TToken = nil);
 begin
-  FTerm := ATerm;
-  FExpr := AExpr;
+  Term := ATerm;
+  Expr := AExpr;
+  EvalData := TExprValue.Create(DetermineType);
+
   if AOpToken <> nil then
   begin
     if (AOpToken.Tag = ttPLUS) or (AOPToken.Tag = ttMINUS) then
     begin
-      if (DetermineType <> 'num') then
-        raise Exception.Create('Non num type operand used in Expr');
-      FOpTokenTag := AOpToken.Tag;
-      FTokenLexeme := AOpToken.Lexeme;
-      FDisplayText := FTokenLexeme;
+      if (EvalData.ValueType <> vtNUM) then
+        raise Exception.Create('Non NUM type operand used in Expr');
+      OpTokenTag := AOpToken.Tag;
+      OpTokenLexeme := AOpToken.Lexeme;
+      DisplayText := OpTokenLexeme;
     end
     else
       raise  Exception.Create(AOpToken.Lexeme + ' token passed to Expr Syntax Node');
   end
   else
   begin
-    FOpTokenTag := ttNONE;
-    FDisplayText := 'Expr';
+    OpTokenTag := ttNONE;
+    DisplayText := 'Expr';
   end;
   ChildrenList := TList.Create;
-  FType := DetermineType;
-  if FType = 'none' then raise Exception.Create('Type mismatch in TExpr');
-  ChildrenList.Add(FTerm);
-  ChildrenList.Add(FExpr);
+  if EvalData.ValueType = vtUNDEFINED then raise Exception.Create('Type mismatch in TExpr');
+  ChildrenList.Add(Term);
+  ChildrenList.Add(Expr);
   FreeAndNil(AOpToken);
 end;
 
 procedure TExpr.Gen;
 begin
-  if FTerm <> nil then FTerm.Gen;
-  if FOpTokenTag <> ttNONE then Write(' ' + FTokenLexeme + ' ');
+  if Term <> nil then Term.Gen;
+  if OpTokenTag <> ttNONE then Write(' ' + OpTokenLexeme + ' ');
   // for correct postfix order
-  if FExpr <> nil then FExpr.Gen;
+  if Expr <> nil then Expr.Gen;
 
 end;
 
-function TExpr.Eval(AInputValue: extended = 0): extended;
+function TExpr.Eval(AInputValue: TExprValue): TExprValue;
 begin
   { building result of expression based on available components of exp }
-  Result := FTerm.Eval();
-  case FOpTokenTag of
+  Result := Term.Eval();
+  case OpTokenTag of
     ttPLUS: begin
-      Result := AInputValue + Result;
+      Result.Value := FloatToStr(StrToFloat(AInputValue.Value) + StrToFloat(Result.Value));
     end;
     ttMINUS: begin
-      Result := AInputValue - Result;
+      Result.Value := FloatToStr(StrToFloat(AInputValue.Value) - StrToFloat(Result.Value));
     end;
   end;
-  if FExpr <> nil then
+  if Expr <> nil then
   begin
-    Result := FExpr.eval(Result);
+    Result := Expr.eval(Result);
   end;
 
 end;
 
-function TExpr.CheckTypes: boolean;
-begin
-  Result := True;
-  if (FExpr <> nil) and (FExpr.FType <> 'num') then Result := False;
-  if (FTerm <> nil) and (FTerm.FType <> 'num') then Result := False;
-end;
 
-function TExpr.DetermineType: string;
+function TExpr.DetermineType: TValueType;
 begin
-  Result := 'none';
-  if FTerm <> nil then Result := FTerm.FType;
-  if (FExpr <> nil) and (FExpr.FType <> FTerm.FType) then Result := 'none';
+  Result := vtUNDEFINED;
+  if Term <> nil then Result := Term.EvalData.ValueType;
+  if (Expr <> nil) and (Expr.EvalData.ValueType <> Term.EvalData.ValueType) then
+    Result := vtUNDEFINED;
 end;
 
 { TTerm }
 
-constructor TTerm.Create(AFactor: TSyntaxNode; ATerm: TSyntaxNode;
-  AOpToken: TToken = nil);
+constructor TTerm.Create(AFactor: TSyntaxNode; ATerm: TSyntaxNode; AOpToken: TToken = nil);
 begin
-  FFactor := AFactor;
-  FTerm := ATerm;
+  Factor := AFactor;
+  Term := ATerm;
+  EvalData := TExprValue.Create(DetermineType);
+
   if AOpToken <> nil then
   begin
     if (AOpToken.Tag = ttMULTIPLY) or (AOPToken.Tag = ttDIVIDE) then
     begin
-      if (DetermineType <> 'num') then
-        raise Exception.Create('Non num type operand used in Term');
-      FTokenTag := AOpToken.Tag;
-      FTokenLexeme := AOpToken.Lexeme;
-      FDisplayText := FTokenLexeme;
+      if (EvalData.ValueType <> vtNUM) then
+        raise Exception.Create('Non NUM type operand used in Term');
+      TokenTag := AOpToken.Tag;
+      TokenLexeme := AOpToken.Lexeme;
+      DisplayText := TokenLexeme;
     end
     else
       raise  Exception.Create(AOpToken.Lexeme + ' token passed to Term Syntax Node');
   end
   else
   begin
-    FTokenTag := ttNONE;
-    FDisplayText := 'Term';
+    TokenTag := ttNONE;
+    DisplayText := 'Term';
   end;
   ChildrenList := TList.Create;
-  FType := DetermineType;
-  if FType = 'none' then raise Exception.Create('Type mismatch in TTerm');
-  ChildrenList.Add(FFactor);
-  ChildrenList.Add(FTerm);
+  if EvalData.ValueType = vtUNDEFINED then
+    raise Exception.Create('Type mismatch in TTerm');
+  ChildrenList.Add(Factor);
+  ChildrenList.Add(Term);
   FreeAndNil(AOpToken);
 end;
 
 procedure TTerm.Gen;
 begin
-  if FFactor <> nil then FFactor.Gen;
+  if Factor <> nil then Factor.Gen;
 
-  if FTokenTag <> ttNONE then Write(' ' + FTokenLexeme + ' ');
+  if TokenTag <> ttNONE then Write(' ' + TokenLexeme + ' ');
   //for correct postfix order 1/2*3
 
-  if FTerm <> nil then FTerm.Gen;
+  if Term <> nil then Term.Gen;
 end;
 
-function TTerm.Eval(AInputValue: extended = 0): extended;
+function TTerm.Eval(AInputValue: TExprValue = nil): TExprValue;
 begin
-  Result := FFactor.eval();
-  case FTokenTag of
+  Result := Factor.eval();
+  case TokenTag of
     ttMULTIPLY: begin
-      Result := AInputValue * Result;
+      Result.Value := FloatToStr(StrToFloat(AInputValue.Value) * StrToFloat(Result.Value));
     end;
     ttDIVIDE: begin
-      Result := AInputValue / Result;
+      Result.Value := FloatToStr(StrToFloat(AInputValue.Value) / StrToFloat(Result.Value));
     end;
   end;
-  if FTerm <> nil then
+  if Term <> nil then
   begin
-    Result := FTerm.eval(Result);
+    Result := Term.eval(Result);
   end;
 end;
 
-function TTerm.CheckTypes: boolean;
-begin
-  Result := True;
-  if (FFactor <> nil) and (FFactor.FType <> 'num') then Result := False;
-  if (FTerm <> nil) and (FTerm.FType <> 'num') then Result := False;
-end;
 
-function TTerm.DetermineType: string;
+
+function TTerm.DetermineType: TValueType;
 begin
-  Result := 'none';
-  if FFactor <> nil then Result := FFactor.FType;
-  if (FTerm <> nil) and (FTerm.FType <> FFactor.FType) then Result := 'none';
+  Result := vtUNDEFINED;
+  if Factor <> nil then Result := Factor.EvalData.ValueType;
+  if (Term <> nil) and (Term.EvalData.ValueType <> Factor.EvalData.ValueType) then
+    Result := vtUNDEFINED;
 end;
 
 
@@ -583,19 +615,22 @@ begin
   Symbols.Add(ALexeme, ASymbol);
 end;
 
-function TSymbolTable.GetType(ALexeme: string): string;
+function TSymbolTable.GetType(ALexeme: string): TValueType;
 begin
   if Symbols.Items[ALexeme] <> nil then
-    Result := TSymbol(Symbols.Items[ALexeme]).SymbolType
+    Result := TSymbol(Symbols.Items[ALexeme]).EvalData.ValueType
   else
-    Result := '';
+    Result := vtUNDEFINED;
 end;
 
 procedure TableIterator(Item: TObject; const key: string; var Continue: boolean);
+var
+sType : string;
 begin
+  WriteStr(sType,TSymbol(Item).EvalData.ValueType);
   continue := True;
-  Write(key, ' ', TSymbol(Item).SymbolType + ':' +
-    FloatToStr(TSymbol(Item).SymbolValue) + LineEnding);
+  Write(key, ' ', sType + ':' +
+    TSymbol(Item).EvalData.Value + LineEnding);
 end;
 
 procedure TSymbolTable.PrintSymbols;
@@ -604,14 +639,19 @@ begin
   Symbols.Iterate(@TableIterator);
 end;
 
+procedure TSyntaxNode.SetDisplayText(AValue: string);
+begin
+  FDisplayText := AValue;
+end;
+
 procedure TSyntaxNode.Gen;
 begin
   { each node has to implement its Gen method }
 end;
 
-function TSyntaxNode.Eval(AInputValue: extended = 0): extended;
+function TSyntaxNode.Eval(AInputValue: TExprValue): TExprValue;
 begin
-  Result := 0;
+  raise Exception.Create('TSyntaxNode Eval function should be implemented in subclasses');
 end;
 
 
@@ -741,7 +781,7 @@ begin
   WriteLn();
   WriteLn('Parsing finished with OK result' + LineEnding);
   WriteLn('WORDS TABLE CONTENT:');
-  Lex.Words.Iterate(@Lex.WordsIterator);
+  Lex.WordsTable.Iterate(@Lex.WordsIterator);
   WriteLn();
   FreeAndNil(Lex);
 
@@ -786,7 +826,7 @@ begin
   WriteLn();
   WriteLn('Parsing finished with OK result' + LineEnding);
   WriteLn('WORDS TABLE CONTENT:');
-  Lex.Words.Iterate(@Lex.WordsIterator);
+  Lex.WordsTable.Iterate(@Lex.WordsIterator);
   WriteLn();
   FreeAndNil(Lex);
 
@@ -799,7 +839,7 @@ var
   Nodes: TNodes;
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'Program';
+  ParseNode.Name := 'Program';
   Result.SyntaxNode := TPrgSeq.Create;
 
   while Lex.Lookahead.Tag <> ttNONE do
@@ -821,7 +861,7 @@ var
 begin
 
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'block';
+  ParseNode.Name := 'block';
 
   case Lex.Lookahead.Tag of
     ttCURLY_LEFT: begin
@@ -866,7 +906,7 @@ var
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'decls';
+  ParseNode.Name := 'decls';
 
   while Lex.Lookahead.Tag = ttTYPENAME do
   begin
@@ -881,24 +921,40 @@ var
   ParseNode: TParseNode = nil;
   HelperString: string;
   Symbol: TSymbol;
+  IdValue: TExprValue;
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'decl';
+  ParseNode.Name := 'decl';
 
   HelperString := Lex.Lookahead.Lexeme;
 
   Symbol := TSymbol.Create;
-  Symbol.SymbolType := Lex.Lookahead.Lexeme;
+
+  case Lex.Lookahead.Lexeme of
+    'num': begin
+      IdValue := TExprValue.Create(vtNUM, '');
+    end;
+    'bool': begin
+      IdValue := TExprValue.Create(vtBOOL, '');
+    end;
+    else
+    begin
+      raise Exception.Create('Unknown type in declaraion');
+    end;
+
+  end;
 
   Lex.Match(ttTYPENAME);
+
+  Symbol.EvalData := IdValue;
 
   if Lex.Lookahead.Tag <> ttIDENTIFIER then
     raise  Exception.Create('Identifier missing in declaration!');
 
   HelperString := HelperString + ' ' + Lex.Lookahead.Lexeme;
 
-  Symbol.SymbolPosition := Lex.Lookahead.LexemePosition[0];
+  Symbol.Position := Lex.Lookahead.Position;
   try
     SymbolTableCurrent.Add(Lex.Lookahead.Lexeme, Symbol);
   except
@@ -919,9 +975,10 @@ var
   Nodes: TNodes;
   Symbol: TSymbol;
   LeftSide: string;
+  vt: TValueType;
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'assignment';
+  ParseNode.Name := 'assignment';
   ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
   Symbol := FindSymbol(Lex.Lookahead.Lexeme);
   if Symbol = nil then
@@ -932,13 +989,23 @@ begin
   Lex.Match(ttIDENTIFIER);
   ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
   Lex.Match(ttEQUAL_SIGN);
-  Nodes := expr();
+  {#todo: tu je asi chyba pri assignmente musim is zase od bool asi}
+  //Nodes := expr();
+  Nodes := bool();
+  {#todo treba overovat typ uz tu alebo staci pri eval ? }
   Result.SyntaxNode := TAssign.Create(LeftSide, TExpr(Nodes.SyntaxNode));
 
   ParseNode.Link(Nodes.ParseNode);
-  Symbol.SymbolValue := Nodes.SyntaxNode.Eval();
-  Symbol.isAssigned := True;
-  FreeAndNil(Nodes);
+
+  vt :=  Nodes.SyntaxNode.Eval().ValueType;
+  if Symbol.EvalData.ValueType = Nodes.SyntaxNode.Eval().ValueType then
+  begin
+    Symbol.EvalData := Nodes.SyntaxNode.Eval();
+    Symbol.IsAssigned := True;
+    FreeAndNil(Nodes);
+  end
+  else
+    raise Exception.Create('Right side  type mismatch with left side type');
 end;
 
 function TParser.statements(): TNodes;
@@ -949,7 +1016,7 @@ var
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'statements';
+  ParseNode.Name := 'statements';
   Result.SyntaxNode := TSeq.Create;
 
   while (Lex.Lookahead.Tag <> ttCURLY_RIGHT) do
@@ -1004,7 +1071,7 @@ var
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'bool';
+  ParseNode.Name := 'bool';
 
   Nodes := bool_term();
   ParseNode.Link(Nodes.ParseNode);
@@ -1025,7 +1092,7 @@ var
   Nodes: TNodes;
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'bool_term';
+  ParseNode.Name := 'bool_term';
 
   case Lex.Lookahead.Tag of
     ttLEFT_PARENS: begin
@@ -1053,16 +1120,16 @@ var
   Nodes: TNodes;
   ABoolTerm: TSyntaxNode;
   ABool: TSyntaxNode;
-  AToken: TToken;
+  AOpToken: TToken;
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'bool_rest';
+  ParseNode.Name := 'bool_rest';
 
   case Lex.Lookahead.Tag of
     ttOR: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
-      AToken := TToken.Create(Lex.Lookahead.Tag, Lex.Lookahead.Lexeme);
+      AOpToken := TToken.Create(Lex.Lookahead.Tag, Lex.Lookahead.Lexeme);
       Lex.Match(ttOR);
 
       Nodes := bool_term();
@@ -1074,12 +1141,12 @@ begin
       ABool := Nodes.SyntaxNode;
       FreeAndNil(Nodes);
 
-      Result.SyntaxNode := TBool.Create(ABoolTerm, ABool, AToken);
+      Result.SyntaxNode := TBool.Create(ABoolTerm, ABool, AOpToken);
 
     end;
     ttAND: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
-      AToken := TToken.Create(Lex.Lookahead.Tag, Lex.Lookahead.Lexeme);
+      AOpToken := TToken.Create(Lex.Lookahead.Tag, Lex.Lookahead.Lexeme);
 
       Lex.Match(ttAND);
       Nodes := bool();
@@ -1091,7 +1158,7 @@ begin
       ABool := Nodes.SyntaxNode;
       FreeAndNil(Nodes);
 
-      Result.SyntaxNode := TBool.Create(ABoolTerm, ABool, AToken);
+      Result.SyntaxNode := TBool.Create(ABoolTerm, ABool, AOpToken);
 
     end;
 
@@ -1108,7 +1175,7 @@ var
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'expr';
+  ParseNode.Name := 'expr';
 
   Nodes := term();
   ParseNode.Link(Nodes.ParseNode);
@@ -1133,7 +1200,7 @@ var
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'term';
+  ParseNode.Name := 'term';
 
   Nodes := factor();
   ParseNode.Link(Nodes.ParseNode);
@@ -1158,7 +1225,7 @@ var
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'expr_rest';
+  ParseNode.Name := 'expr_rest';
 
   case Lex.Lookahead.Tag of
     ttPLUS: begin
@@ -1208,7 +1275,7 @@ var
   AToken: TToken;
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'term_rest';
+  ParseNode.Name := 'term_rest';
   case Lex.Lookahead.Tag of
     ttMULTIPLY: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
@@ -1264,7 +1331,7 @@ begin
     begin
       Write(' ');
     end;
-    writeln(Node.DisplayText);
+    writeln(Node.Name);
     for i := 0 to (ChildrenCount - 1) do
     begin
       PrintParseTree(TParseNode(Node.ChildrenList.Items[i]), SpaceCount + 1);
@@ -1281,7 +1348,7 @@ procedure TParser.ShowParseTree(AParseNode: TParseNode; ATreeView: TTreeView);
     ChildrenCount: integer = 0;
   begin
     ChildrenCount := AParseNode.ChildrenList.Count;
-    NewViewNode := ATreeView.Items.AddChild(AViewNode, AParseNode.DisplayText);
+    NewViewNode := ATreeView.Items.AddChild(AViewNode, AParseNode.Name);
     for i := 0 to (ChildrenCount - 1) do
     begin
       _AddViewNode(TParseNode(AParseNode.ChildrenList.Items[i]), NewViewNode);
@@ -1322,7 +1389,6 @@ function TParser.factor: TNodes;
 var
   ParseNode: TParseNode = nil;
   Nodes: TNodes;
-  s: string;
   _Symbol: TSymbol;
   _Token: TToken;
   row: integer;
@@ -1330,56 +1396,58 @@ var
 
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
-  ParseNode.DisplayText := 'factor';
+  ParseNode.Name := 'factor';
 
   case Lex.Lookahead.Tag of
     ttMINUS: begin
       Lex.Match(ttMINUS); // processing negative ttNUMBER sign
       ParseNode.AddChildWithText('-' + Lex.Lookahead.Lexeme);
-      _Token := TToken.Create(ttNUMBER, '-' + Lex.Lookahead.Lexeme);
-      Result.SyntaxNode := TFactor.Create(_Token);
-      Result.SyntaxNode.FType := 'num';
+      Result.SyntaxNode := TFactor.Create(ttNUMBER, '-' + Lex.Lookahead.Lexeme);
+      Result.SyntaxNode.EvalData := TExprValue.Create(vtNUM, '-' + Lex.Lookahead.Lexeme);
       Lex.Match(ttNUMBER);
     end;
 
     ttNUMBER: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
-      Result.SyntaxNode := TFactor.Create(Lex.Lookahead);
-      Result.SyntaxNode.FType := 'num';
+      Result.SyntaxNode := TFactor.Create(ttNUMBER, Lex.Lookahead.Lexeme);
+      Result.SyntaxNode.EvalData := TExprValue.Create(vtNUM, Lex.Lookahead.Lexeme);
       Lex.Match(ttNUMBER);
     end;
+
     ttTRUE: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
-      Result.SyntaxNode := TFactor.Create(Lex.Lookahead, 1);
-      Result.SyntaxNode.FType := 'bool';
+      Result.SyntaxNode := TFactor.Create(ttTRUE, Lex.Lookahead.Lexeme);
+      Result.SyntaxNode.EvalData := TExprValue.Create(vtBOOL, Lex.Lookahead.Lexeme);
       Lex.Match(ttTRUE);
     end;
+
     ttFALSE: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
-      Result.SyntaxNode := TFactor.Create(Lex.Lookahead, 0);
-      Result.SyntaxNode.FType := 'bool';
+      Result.SyntaxNode := TFactor.Create(ttFALSE, Lex.Lookahead.Lexeme);
+      Result.SyntaxNode.EvalData := TExprValue.Create(vtBOOL, Lex.Lookahead.Lexeme);
       Lex.Match(ttFALSE);
     end;
 
     ttIDENTIFIER: begin
       { #done : add searching whole symbol table chain }
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
-      row := Lex.Lookahead.LexemePosition[0][0];
-      col := Lex.Lookahead.LexemePosition[0][1];
+      row := Lex.Lookahead.Position[0];
+      col := Lex.Lookahead.Position[1];
       _Symbol := FindSymbol(Lex.Lookahead.Lexeme);
-      if _Symbol <> nil then
+
+      if _Symbol = nil then
       begin
-        s := _Symbol.SymbolType;
-      end
-      else
         raise Exception.Create('(' + IntToStr(row) + ',' + IntToStr(col) +
           ')' + ' Identifier ' + Lex.Lookahead.Lexeme + ' is not declared');
-      if _Symbol.isAssigned <> True then
+      end;
+
+      if _Symbol.IsAssigned = False then
         raise Exception.Create('@(' + IntToStr(row) + ',' + IntToStr(col) +
           ') ' + '"' + Lex.Lookahead.Lexeme + '"' +
           ' is used in expression without being assigned a value!');
-      Result.SyntaxNode := TFactor.Create(Lex.Lookahead, _Symbol.SymbolValue);
-      Result.SyntaxNode.FType := _Symbol.SymbolType;
+
+      Result.SyntaxNode := TFactor.Create(Lex.Lookahead.Tag, _Symbol.EvalData.Value);
+      Result.SyntaxNode.EvalData := _Symbol.EvalData;
       Lex.Match(ttIDENTIFIER);
     end;
     ttLEFT_PARENS: begin
@@ -1426,7 +1494,7 @@ var
   Node: TParseNode;
 begin
   Node := TParseNode.Create();
-  Node.DisplayText := TextToAdd;
+  Node.Name := TextToAdd;
   Link(Node);
 end;
 

@@ -8,32 +8,58 @@ uses
   Classes, Contnrs;
 
 type
-  TTokenTag = (ttNONE, ttNUMBER, ttIDENTIFIER, ttPLUS, ttMINUS, ttMULTIPLY,
-    ttDIVIDE, ttLEFT_PARENS,
-    ttRIGHT_PARENS, ttSEMICOLON, ttFILE_END, ttUNKNOWN, ttCURLY_LEFT, ttCURLY_RIGHT,
-    ttTYPENAME, ttEQUAL_SIGN, ttAND, ttOR, ttIS_EQUAL, ttTRUE, ttFALSE);
+  TTokenTag = (
+    ttNONE, ttNUMBER, ttIDENTIFIER, ttPLUS,
+    ttMINUS, ttMULTIPLY, ttDIVIDE, ttLEFT_PARENS,
+    ttRIGHT_PARENS, ttSEMICOLON, ttFILE_END, ttUNKNOWN,
+    ttCURLY_LEFT, ttCURLY_RIGHT, ttTYPENAME, ttEQUAL_SIGN,
+    ttAND, ttOR, ttIS_EQUAL, ttTRUE, ttFALSE
+    );
 
   { TToken }
+
+  TPosition = array [0..1] of integer;
 
   TToken = class
     Tag: TTokenTag;
     Lexeme: string;
-    Value: extended;
-    LexemePosition: array of array [0..1] of integer;
-
     constructor Create(ATag: TTokenTag; ALexeme: string);
   end;
 
+  { TLookahead }
+
+  TLookahead = class
+  private
+    FToken: TToken;
+    function GetLexeme: string;
+    function GetTag: TTokenTag;
+    procedure SetLexeme(AValue: string);
+    procedure SetTag(AValue: TTokenTag);
+    procedure SetToken(AValue: TToken);
+  public
+    Position: TPosition;
+    constructor Create(ATag: TTokenTag; ALexeme: string; ARow: integer = 0; ACol: integer = 0);
+    property Tag: TTokenTag read GetTag write SetTag;
+    property Lexeme: string read GetLexeme write SetLexeme;
+    property Token: TToken read FToken write SetToken;
+  end;
+
+  { TWord }
+
+  TWord = class
+    Token: TToken;
+    Positions: array of TPosition;
+    constructor Create(AToken: TToken);
+  end;
 
   { TLexer }
 
   TLexer = class
-  type
-    TPosition = array [0..1] of integer;
 
   private
-    FLookahead: TToken;
-    procedure setLookahead(AValue: TToken);
+    FLookahead: TLookahead;
+    procedure setLookahead(AValue: TLookahead);
+
   public
     SrcLines: TStringList;
     CurrentLine: string;
@@ -44,23 +70,25 @@ type
     CharPosition: word;
     CurrentChar: string;
     PeekedChar: string;
-    Words: TFPObjectHashTable;
+    WordsTable: TFPObjectHashTable;
 
     constructor Create(const SrcFileName: string);
     constructor CreateManual(AMemoStrings: TStrings);
     destructor Destroy; override;
-    function ReadLine(): boolean;
-    function PeekLine(src: TStringList): boolean;
-    procedure ReadChar();
-    procedure PeekChar();
-    function PeekCharNonWhite(): string;
+
     procedure Advance();
-    procedure Match(checked_token: TTokenTag);
+    procedure AddWordPosition(APosition: TPosition; AWord: TWord);
     procedure IsNumber(negative: boolean);
     function InitWordsTable: TFPObjectHashTable;
+    procedure Match(checked_token: TTokenTag);
+    procedure PeekChar();
+    function PeekCharNonWhite(): string;
+    function PeekLine(src: TStringList): boolean;
+    procedure ReadChar();
+    function ReadLine(): boolean;
+    procedure UpdateLookaheadToken(ATag: TTokenTag; ALexeme: string);
     procedure WordsIterator(Item: TObject; const key: string; var Continue: boolean);
-    procedure StoreLexemePosition(APosition: TPosition; AToken: TToken);
-    property Lookahead: TToken read FLookahead write setLookahead;
+    property Lookahead: TLookahead read FLookahead write setLookahead;
 
 
   end;
@@ -72,7 +100,51 @@ implementation
 uses
   SysUtils, LazUTF8, Character;
 
-procedure TLexer.setLookahead(AValue: TToken);
+{ TWord }
+
+constructor TWord.Create(AToken: TToken);
+begin
+  Token := AToken;
+end;
+
+{ TLookahead }
+
+procedure TLookahead.SetToken(AValue: TToken);
+begin
+  if FToken = AValue then Exit;
+  FreeAndNil(FToken);
+  FToken := AValue;
+end;
+
+function TLookahead.GetTag: TTokenTag;
+begin
+  Result := FToken.Tag;
+end;
+
+procedure TLookahead.SetLexeme(AValue: string);
+begin
+  FToken.Lexeme := AValue;
+end;
+
+function TLookahead.GetLexeme: string;
+begin
+  Result := FToken.Lexeme;
+end;
+
+procedure TLookahead.SetTag(AValue: TTokenTag);
+begin
+  FToken.Tag := AValue;
+end;
+
+constructor TLookahead.Create(ATag: TTokenTag; ALexeme: string; ARow: integer = 0;
+  ACol: integer = 0);
+begin
+  FToken:= TToken.Create(ATag, ALexeme);
+  Position[0] := ARow;
+  Position[1] := ACol;
+end;
+
+procedure TLexer.setLookahead(AValue: TLookahead);
 begin
   if FLookahead = AValue then Exit;
   FreeAndNil(FLookahead);
@@ -83,16 +155,16 @@ constructor TLexer.Create(const SrcFileName: string);
 begin
   SrcLines := TStringList.Create;
   SrcLines.LoadFromFile(SrcFileName);
-  Lookahead := TToken.Create(ttNONE, '');
-  Words := InitWordsTable;
+  Lookahead := TLookahead.Create(ttNONE, '');
+  WordsTable := InitWordsTable;
 end;
 
 constructor TLexer.CreateManual(AMemoStrings: TStrings);
 begin
   SrcLines := TStringList.Create;
   SrcLines.AddStrings(AMemoStrings);
-  Lookahead := TToken.Create(ttNONE, '');
-  Words := InitWordsTable;
+  Lookahead := TLookahead.Create(ttNONE, '');
+  WordsTable := InitWordsTable;
 
 end;
 
@@ -100,7 +172,7 @@ destructor TLexer.Destroy;
 begin
   FreeAndNil(SrcLines);
   FreeAndNil(FLookahead);
-  FreeAndNil(Words);
+  FreeAndNil(WordsTable);
   inherited Destroy;
 end;
 
@@ -122,6 +194,12 @@ begin
     Result := False;
   end;
 
+end;
+
+procedure TLexer.UpdateLookaheadToken(ATag: TTokenTag; ALexeme: string);
+begin
+  Lookahead.Tag := ATag;
+  Lookahead.Lexeme := ALexeme;
 end;
 
 function TLexer.PeekLine(src: TStringList): boolean;
@@ -229,78 +307,93 @@ end;
 
 procedure TLexer.Advance();
 var
-  t: TToken = nil;
+  _Word: TWord = nil;
   s: string = '';
-  IdPosition: array [0..1] of integer;
+  TokenPos: array [0..1] of integer;
+  _Token: TToken;
 
 begin
   ReadChar();
 
-  while (CurrentChar <> '') and (IsWhiteSpace(utf8decode(CurrentChar), 1) or
-      (CurrentChar = LineEnding)) do
-    ReadChar();
+  { skip white space }
+  while
+    (CurrentChar <> '') and (IsWhiteSpace(utf8decode(CurrentChar), 1) or
+      (CurrentChar = LineEnding)) do ReadChar();
 
-  IdPosition[0] := CurrentLineNumber;
-  IdPosition[1] := CharPosition;
+  TokenPos[0] := CurrentLineNumber;
+  TokenPos[1] := CharPosition;
   case CurrentChar of
     '+': begin
-      Lookahead := TToken.Create(ttPLUS, '+');
+      UpdateLookaheadToken(ttPLUS, '+');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     '-': begin
-      Lookahead := TToken.Create(ttMINUS, '-');
+      UpdateLookaheadToken(ttMINUS, '-');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     '*': begin
-      Lookahead := TToken.Create(ttMULTIPLY, '*');
+      UpdateLookaheadToken(ttMULTIPLY, '*');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     '/': begin
-      Lookahead := TToken.Create(ttDIVIDE, '/');
+      UpdateLookaheadToken(ttDIVIDE, '/');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     '(': begin
-      Lookahead := TToken.Create(ttLEFT_PARENS, '(');
+      UpdateLookaheadToken(ttLEFT_PARENS, '(');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     ')': begin
-      Lookahead := TToken.Create(ttRIGHT_PARENS, ')');
+      UpdateLookaheadToken(ttRIGHT_PARENS, ')');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     ';': begin
-      Lookahead := TToken.Create(ttSEMICOLON, ';');
+      UpdateLookaheadToken(ttSEMICOLON, ';');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     '{': begin
-      Lookahead := TToken.Create(ttCURLY_LEFT, '{');
+      UpdateLookaheadToken(ttCURLY_LEFT, '{');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
     '}': begin
-      Lookahead := TToken.Create(ttCURLY_RIGHT, '}');
+      UpdateLookaheadToken(ttCURLY_RIGHT, '}');
+      Lookahead.Position := TokenPos;
       Exit;
     end;
     '=': begin
-      Lookahead := TToken.Create(ttEQUAL_SIGN, '=');
+      UpdateLookaheadToken(ttEQUAL_SIGN, '=');
+      Lookahead.Position := TokenPos;
       Exit;
     end;
     '|': begin
       if PeekedChar = '|' then
       begin
         ReadChar();
-        Lookahead := TToken.Create(ttOR, '||');
+        UpdateLookaheadToken(ttOR, '||');
+        Lookahead.Position := TokenPos;
+        Exit;
       end;
-      Exit;
     end;
     '&': begin
       if PeekedChar = '&' then
       begin
         ReadChar();
-        Lookahead := TToken.Create(ttAND, '&&');
+        UpdateLookaheadToken(ttAND, '&&');
+        Lookahead.Position := TokenPos;
+        Exit;
       end;
-      Exit;
     end;
     '': begin
-      Lookahead := TToken.Create(ttNONE, '');
+      UpdateLookaheadToken(ttNONE, '');
+      Lookahead.Position := TokenPos;
       Exit();
     end;
   end;
@@ -328,11 +421,13 @@ begin
     end;
     if not (IsLetter(UTF8Decode(PeekedChar), 1)) then
     begin
-      Lookahead := TToken.Create(ttNUMBER, s);
+      UpdateLookaheadToken(ttNUMBER, s);
+      Lookahead.Position := TokenPos;
       Exit();
     end;
 
   end;
+
   {check for ttIDENTIFIER }
   if IsLetter(utf8decode(CurrentChar), 1) then
   begin
@@ -343,28 +438,27 @@ begin
       s := s + CurrentChar;
     end;
 
-    t := TToken(Words.Items[s]);
-    if t <> nil then   // ttIDENTIFIER exists ?
+    _Word := TWord(WordsTable.Items[s]);
+    if _Word <> nil then   // ttIDENTIFIER exists ?
     begin
-      Lookahead := TToken.Create(t.tag, s);
-      StoreLexemePosition(IdPosition, t); // update word table entry
-      StoreLexemePosition(IdPosition, Lookahead);  //and  to new Lookahead
+      UpdateLookaheadToken(_Word.Token.Tag, _Word.Token.Lexeme); //existing word to Lookahead
+      AddWordPosition(TokenPos, _Word); // update word table entry
+      Lookahead.Position := TokenPos;  //and   Lookahead position
     end
     else
     begin
-      Lookahead := TToken.Create(ttIDENTIFIER, s);
-      t := TToken.Create(ttIDENTIFIER, s);
-      // create copy of data as Lookahead will get changed
-      StoreLexemePosition(IdPosition, t); // update word table entry
-      StoreLexemePosition(IdPosition, Lookahead);  //and  to new Lookahead
-      Words.Add(s, t);  // add new ttIDENTIFIER to words table
+      UpdateLookaheadToken(ttIDENTIFIER, s);
+      _Token := TToken.Create(ttIDENTIFIER, s);
+      _Word := TWord.Create(_Token);    // create copy of data as Lookahead will get changed
+      AddWordPosition(TokenPos, _Word); // input position to new word
+      Lookahead.Position := TokenPos;  //and  to new Lookahead
+      WordsTable.Add(s, _Word);  // add new ttIDENTIFIER to WordsTable table
     end;
 
     {todo: finalize token storage for identifiers }
     Exit();
   end;
-  Lookahead.Tag := ttUNKNOWN;
-  Lookahead.Lexeme := CurrentChar;
+  UpdateLookaheadToken(ttUNKNOWN, CurrentChar);
   Exit();
 end;
 
@@ -423,18 +517,20 @@ type
 var
   WordList: TWordList = ('num', 'bool', 'true', 'false');
   TagList: TTagList = (ttTYPENAME, ttTYPENAME, ttTRUE, ttFALSE);
-  s: string;
+  WordName: string;
   tag: TTokenTag;
   t: TToken;
   i: integer;
+  word: TWord;
 begin
   Result := TFPObjectHashTable.Create();
   for i := 0 to Length(WordList) - 1 do
   begin
-    s := WordList[i];
+    WordName := WordList[i];
     tag := TagList[i];
-    t := TToken.Create(tag, s);
-    Result.Add(s, t);
+    t := TToken.Create(tag, WordName);
+    word := TWord.Create(t);
+    Result.Add(WordName, word);
   end;
 
 end;
@@ -446,7 +542,7 @@ begin
   Continue := True;
   Write(key, ' : ');
 
-  for ar in TToken(Item).LexemePosition do
+  for ar in TWord(Item).Positions do
   begin
     //ttIDENTIFIER postions in src text line, col
     Write('(', ar[0], ',', ar[1], ') ');
@@ -454,12 +550,10 @@ begin
   writeln();
 end;
 
-procedure TLexer.StoreLexemePosition(APosition: TPosition; AToken: TToken);
+procedure TLexer.AddWordPosition(APosition: TPosition; AWord: TWord);
 begin
-  insert(APosition, AToken.LexemePosition, MaxInt);
+  insert(APosition, AWord.Positions, MaxInt);
 end;
-
-
 
 { TToken }
 
@@ -467,9 +561,6 @@ constructor TToken.Create(ATag: TTokenTag; ALexeme: string);
 begin
   Tag := ATag;
   Lexeme := ALexeme;
-  if ATag = ttNUMBER then
-    Value := StrToFloat(Lexeme);
-
 end;
 
 end.
