@@ -19,7 +19,6 @@ assignment -> ID = expr                assignment.n =  Assign(LeftSide, RightSid
 bool -> bool_term bool_rest
 
 bool_term -> expr
-           | ( bool )
 
 bool_rest ->  || bool_term bool_rest
             | && bool_term bool_rest
@@ -39,15 +38,16 @@ term_rest -> * factor term_rest        term_rest.n =  Term(Factor(); Term(); Loo
 
 factor -> ID                           factor.n = Factor (Lookahead)
         | NUMBER                       factor.n =  Factor (Lookahead)
-        | ( expr)                      factor.n = expr.n
+        | ( bool)                      factor.n = expr.n
 
 
 @ means empty production
 
 *)
-{ #todo : finish grammar comment }
+{ #todo : upravit gramatiku pre bool podla realneho kodu ... }
 { #done : zda sa ze prepis do postscript notacie pre napr. 1/2*3 nie je dobre }
 { #todo : nejako cudne teraz vyzera syntax tree, treba zmenit }
+{ #todo : nespravne vyhodnotenie ak x= 3/2 ; y = 2+x }
 
 unit Parser;
 
@@ -98,6 +98,8 @@ type
     function Eval(AInputValue: TExprValue = nil): TExprValue; virtual;
     destructor Destroy; override;
     function GetDisplayText: string; virtual;
+    function PositionString: string;
+
     property DisplayText: string read GetDisplayText write SetDisplayText;
   end;
 
@@ -123,7 +125,7 @@ type
     TokenLexeme: string;
     constructor Create(AFactor: TSyntaxNode; ATerm: TSyntaxNode; AOpToken: TToken = nil);
     procedure Gen; override;
-    function Eval(AInputValue: TExprValue=nil): TExprValue; override;
+    function Eval(AInputValue: TExprValue = nil): TExprValue; override;
     function DetermineType: TValueType;
   end;
 
@@ -253,6 +255,7 @@ type
     procedure PrintParseTree(Node: TParseNode; SpaceCount: word = 0);
     procedure ShowParseTree(AParseNode: TParseNode; ATreeView: TTreeView);
     procedure PrintSyntaxTree(ANode: TSyntaxNode; SpaceCount: word = 0);
+    function PositionString: string;
     procedure FreeParseTree(Node: TParseNode);
     function FindSymbol(AIdentifier: string): TSymbol;
   end;
@@ -295,13 +298,14 @@ begin
     if (AOpToken.Tag = ttOR) or (AOPToken.Tag = ttAND) then
     begin
       if (EvalData.ValueType <> vtBOOL) then
-        raise Exception.Create('Non Bool operand type in Bool Expression');
+        raise Exception.Create(PositionString + 'Non Bool operand type in Bool Expression');
       OpTokenTag := AOpToken.Tag;
       TokenLexeme := AOpToken.Lexeme;
       DisplayText := TokenLexeme;
     end
     else
-      raise  Exception.Create(AOpToken.Lexeme + ' token passed to Bool Syntax Node');
+      raise  Exception.Create(PositionString + AOpToken.Lexeme +
+        ' token passed to Bool Syntax Node');
   end
   else
   begin
@@ -336,19 +340,19 @@ end;
 
 function TBool.Eval(AInputValue: TExprValue): TExprValue;
 begin
-    Result:= BoolTerm.Eval();
-    case OpTokenTag of
-      ttOR: begin
-        Result.Value:=  BoolToStr(StrToBool(AInputValue.Value) or StrToBool(Result.Value));
-      end;
-      ttAND:begin
-        Result.Value:=  BoolToStr(StrToBool(AInputValue.Value) and StrToBool(Result.Value));
-      end;
+  Result := BoolTerm.Eval();
+  case OpTokenTag of
+    ttOR: begin
+      Result.Value := BoolToStr(StrToBool(AInputValue.Value) or StrToBool(Result.Value), True);
     end;
-if Bool <> nil then
-begin
-  Result := Bool.Eval(Result);
-end;
+    ttAND: begin
+      Result.Value := BoolToStr(StrToBool(AInputValue.Value) and StrToBool(Result.Value), True);
+    end;
+  end;
+  if Bool <> nil then
+  begin
+    Result := Bool.Eval(Result);
+  end;
 
 end;
 
@@ -426,7 +430,8 @@ end;
 
 function TFactor.Eval(AInputValue: TExprValue = nil): TExprValue;
 begin
-  Result := EvalData;
+  // should return copy not reference otherwise will modify itself during run
+  Result := TExprValue.Create(EvalData.ValueType, EvalData.Value);
 end;
 
 { TSequence }
@@ -625,9 +630,9 @@ end;
 
 procedure TableIterator(Item: TObject; const key: string; var Continue: boolean);
 var
-sType : string;
+  sType: string;
 begin
-  WriteStr(sType,TSymbol(Item).EvalData.ValueType);
+  WriteStr(sType, TSymbol(Item).EvalData.ValueType);
   continue := True;
   Write(key, ' ', sType + ':' +
     TSymbol(Item).EvalData.Value + LineEnding);
@@ -663,6 +668,15 @@ end;
 function TSyntaxNode.GetDisplayText: string;
 begin
   Result := FDisplayText;
+end;
+
+function TSyntaxNode.PositionString: string;
+var
+  Row, Col: string;
+begin
+  Row := IntToStr(Lex.Lookahead.Position[0]);
+  Col := IntToStr(Lex.Lookahead.Position[1]);
+  Result := '@(' + Row + ',' + Col + ') ';
 end;
 
 { TNodes }
@@ -769,7 +783,7 @@ begin
         PrintParseTree(ParseRoot);
 
       FreeAndNil(Lex);
-      raise;
+      raise; // re-raise exception
 
       Exit;
 
@@ -940,7 +954,7 @@ begin
     end;
     else
     begin
-      raise Exception.Create('Unknown type in declaraion');
+      raise Exception.Create(PositionString + 'Unknown type in declaraion');
     end;
 
   end;
@@ -950,7 +964,7 @@ begin
   Symbol.EvalData := IdValue;
 
   if Lex.Lookahead.Tag <> ttIDENTIFIER then
-    raise  Exception.Create('Identifier missing in declaration!');
+    raise  Exception.Create(PositionString + 'Identifier missing in declaration!');
 
   HelperString := HelperString + ' ' + Lex.Lookahead.Lexeme;
 
@@ -983,7 +997,8 @@ begin
   Symbol := FindSymbol(Lex.Lookahead.Lexeme);
   if Symbol = nil then
   begin
-    raise Exception.Create('Identifier: ' + Lex.Lookahead.Lexeme + ' not declared!');
+    raise Exception.Create(PositionString + 'Identifier: ' + Lex.Lookahead.Lexeme +
+      ' not declared!');
   end;
   LeftSide := Lex.Lookahead.Lexeme;
   Lex.Match(ttIDENTIFIER);
@@ -997,7 +1012,7 @@ begin
 
   ParseNode.Link(Nodes.ParseNode);
 
-  vt :=  Nodes.SyntaxNode.Eval().ValueType;
+  //vt := Nodes.SyntaxNode.Eval().ValueType;
   if Symbol.EvalData.ValueType = Nodes.SyntaxNode.Eval().ValueType then
   begin
     Symbol.EvalData := Nodes.SyntaxNode.Eval();
@@ -1005,7 +1020,7 @@ begin
     FreeAndNil(Nodes);
   end
   else
-    raise Exception.Create('Right side  type mismatch with left side type');
+    raise Exception.Create(PositionString + 'Right side  type mismatch with left side type');
 end;
 
 function TParser.statements(): TNodes;
@@ -1093,7 +1108,7 @@ var
 begin
   Result := TNodes.CreateAssignParse(ParseNode);
   ParseNode.Name := 'bool_term';
-
+ {
   case Lex.Lookahead.Tag of
     ttLEFT_PARENS: begin
       Lex.Match(ttLEFT_PARENS);
@@ -1111,7 +1126,11 @@ begin
       FreeAndNil(Nodes);
     end;
   end;
-
+ }
+  Nodes := expr();
+  ParseNode.Link(Nodes.ParseNode);
+  Result.SyntaxNode := Nodes.SyntaxNode;
+  FreeAndNil(Nodes);
 end;
 
 function TParser.bool_rest: TNodes;
@@ -1385,6 +1404,15 @@ begin
   end;
 end;
 
+function TParser.PositionString: string;
+var
+  Row, Col: string;
+begin
+  Row := IntToStr(Lex.Lookahead.Position[0]);
+  Col := IntToStr(Lex.Lookahead.Position[1]);
+  Result := '@(' + Row + ',' + Col + ') ';
+end;
+
 function TParser.factor: TNodes;
 var
   ParseNode: TParseNode = nil;
@@ -1453,7 +1481,7 @@ begin
     ttLEFT_PARENS: begin
       ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
       Lex.Match(ttLEFT_PARENS);
-      Nodes := expr();
+      Nodes := bool();
       ParseNode.Link(Nodes.ParseNode);
       Result.SyntaxNode := Nodes.SyntaxNode;
       FreeAndNil(Nodes);
@@ -1464,7 +1492,7 @@ begin
     begin
       raise Exception.Create('@(' + IntToStr(Lex.CurrentLineNumber) +
         ',' + IntToStr(Lex.CharPosition) + ')' +
-        ' Num or Identifier or Left parens expected' +
+        ' Num, Bool, Identifier or Left Parens expected' +
         LineEnding + Lex.CurrentLine);
     end;
   end;
