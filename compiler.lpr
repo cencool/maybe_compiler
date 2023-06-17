@@ -13,6 +13,7 @@ uses
   {$IFDEF WINDOWS}
   Windows,
   {$ENDIF}
+  sysutils,
   Forms, control_panel, Lexer, Parser;
 
 {$R *.res}
@@ -23,6 +24,11 @@ begin
   IsConsole := True; // in System unit
   SysInitStdIO;      // in System unit
   {$ENDIF}
+
+  if FileExists('heap.trc') then
+    DeleteFile('heap.trc');
+  SetHeapTraceOutput('heap.trc');
+
   RequireDerivedFormResource:=True;
   Application.Scaled:=True;
   Application.Initialize;

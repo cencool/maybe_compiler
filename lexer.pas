@@ -39,6 +39,7 @@ type
   public
     Position: TPosition;
     constructor Create(ATag: TTokenTag; ALexeme: string; ARow: integer = 0; ACol: integer = 0);
+    destructor Destroy; override;
     property Tag: TTokenTag read GetTag write SetTag;
     property Lexeme: string read GetLexeme write SetLexeme;
     property Token: TToken read FToken write SetToken;
@@ -50,6 +51,7 @@ type
     Token: TToken;
     Positions: array of TPosition;
     constructor Create(AToken: TToken);
+    destructor Destroy; override;
   end;
 
   { TLexer }
@@ -107,6 +109,12 @@ begin
   Token := AToken;
 end;
 
+destructor TWord.Destroy;
+begin
+  FreeAndNil(Token);
+  inherited Destroy;
+end;
+
 { TLookahead }
 
 procedure TLookahead.SetToken(AValue: TToken);
@@ -142,6 +150,12 @@ begin
   FToken:= TToken.Create(ATag, ALexeme);
   Position[0] := ARow;
   Position[1] := ACol;
+end;
+
+destructor TLookahead.Destroy;
+begin
+  FreeAndNil(FToken);
+  inherited Destroy;
 end;
 
 procedure TLexer.setLookahead(AValue: TLookahead);

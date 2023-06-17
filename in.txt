@@ -1,17 +1,23 @@
 {
 num x;
 num y;
+num q;
 x = 45;
- { num b;
- b = 22;}
+q = x-5;
+ {
+ bool q;
+ num b;
+ b = 22;
+ q = true && false;
+ }
 13/4+x;
 x = 2*x;
 x +1/x;
  {
-num y;
-x =4;
-y = 10-4/3;
-12/x+y;
+  num y;
+  x =4;
+  y = 10-4/3;
+  12/x+y;
  }
 }
 
