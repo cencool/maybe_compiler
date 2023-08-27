@@ -47,7 +47,7 @@ factor -> ID                           factor.n = Factor (Lookahead)
 { #todo : upravit gramatiku pre bool podla realneho kodu ... }
 { #done : zda sa ze prepis do postscript notacie pre napr. 1/2*3 nie je dobre }
 { #todo : nejako cudne teraz vyzera syntax tree, treba zmenit }
-{ #todo : nespravne vyhodnotenie ak x= 3/2 ; y = 2+x }
+{ #done : nespravne vyhodnotenie ak x= 3/2 ; y = 2+x }
 { #todo : memory management - ak su fields/propety ako link na ine objekty tak ich nemozem free }
 
 unit Parser;
@@ -171,7 +171,7 @@ type
   { TAssign }
 
   TAssign = class(TSyntaxNode)
-    { #todo co vlastne chcem aby robil ? }
+    { #done co vlastne chcem aby robil ? }
   private
     FLeftSide: string;
     FRightSide: TExpr;
@@ -973,6 +973,8 @@ var
   ParseNode: TParseNode = nil;
   Nodes: TNodes;
   StoredParent: TSymbolTable;
+  tmpSymbolTable : TSymbolTable;
+  i : integer = 1;
 
 begin
 
@@ -1000,8 +1002,17 @@ begin
       FreeAndNil(Nodes);
       Lex.Match(ttCURLY_RIGHT);
       ParseNode.AddChildWithText('}');
-      writeln('Identifier values on block exit:');
-      SymbolTableCurrent.PrintSymbols; // show current types and values b4 block exit
+      writeln('Identifiers on block exit:');
+      {#done: maybe add to show all variables known in block not only declared new }
+      tmpSymbolTable:= SymbolTableCurrent;
+      repeat
+      //SymbolTableCurrent.PrintSymbols; // show current types and values b4 block exit
+        writeln('Block: ',i);
+        Inc(i);
+        tmpSymbolTable.PrintSymbols;
+        tmpSymbolTable:= tmpSymbolTable.ParentTable;
+      until tmpSymbolTable = nil;
+
       FreeAndNil(SymbolTableCurrent);
       SymbolTableCurrent := StoredParent;
     end;
@@ -1106,8 +1117,7 @@ begin
   Lex.Match(ttIDENTIFIER);
   ParseNode.AddChildWithText(Lex.Lookahead.Lexeme);
   Lex.Match(ttEQUAL_SIGN);
-  {#todo: tu je asi chyba pri assignmente musim is zase od bool asi}
-  //Nodes := expr();
+  {#done: tu je asi chyba pri assignmente musim is zase od bool asi}
   Nodes := bool();
   {#todo treba overovat typ uz tu alebo staci pri eval ? }
   Result.SyntaxNode := TAssign.Create(LeftSide, TExpr(Nodes.SyntaxNode));

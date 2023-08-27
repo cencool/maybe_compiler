@@ -9,15 +9,18 @@ q = x-5;
  num b;
  b = 22;
  q = true && false;
+ q = q || true;
  }
 13/4+x;
 x = 2*x;
 x +1/x;
  {
-  num y;
+  num š;
+  š = 10;
+  {}
   x =4;
   y = 10-4/3;
-  12/x+y;
+  12/x+y+q;
  }
 }
 

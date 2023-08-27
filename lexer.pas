@@ -266,7 +266,7 @@ begin
   if PeekLine(SrcLines) then
   begin
     PeekedChar := UTF8copy(PeekedLine, 1, 1);
-    { #todo : peekchar how about if next line is just newline ? }
+    { #done: peekchar how about if next line is just newline ? }
   end
   else
   begin
@@ -495,7 +495,7 @@ begin
 end;
 
 procedure TLexer.IsNumber(negative: boolean);
-{ #todo : solve negative ttNUMBER lexing}
+{ #done : solve negative ttNUMBER lexing}
 begin
   if IsDigit(utf8decode(CurrentChar), 1) then
   begin
